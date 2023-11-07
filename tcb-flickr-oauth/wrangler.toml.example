@@ -1,0 +1,14 @@
+# Fix all FIXIT comments, and rename this file to wrangler.toml
+
+name = "tcb-flickr-oauth"
+main = "src/index.ts"
+compatibility_date = "2023-10-30"
+node_compat = true
+
+kv_namespaces = [
+    { binding = "TCB_KV", id = "your_kv_id_here" }  # FIXIT: Use your KV's id
+]
+
+[env.production]
+routes = ["your.domain.com/*"]  # FIXIT: Use your domain
+workers_dev = false
