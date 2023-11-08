@@ -25,16 +25,16 @@ export default {
       oauth_request_token_request
     );
     const oauth_request_token_response_params = new URLSearchParams(await oauth_request_token_response.text());
-    const oauth_token = oauth_request_token_response_params.get('oauth_token');
-    const oauth_token_secret = oauth_request_token_response_params.get('oauth_token_secret');
+    const oauth_request_token = oauth_request_token_response_params.get('oauth_token');
+    const oauth_request_token_secret = oauth_request_token_response_params.get('oauth_token_secret');
 
-    if (oauth_token) {
-      await env.TCB_KV.put('flickr.oauth.token', oauth_token);
-    }
-    if (oauth_token_secret) {
-      await env.TCB_KV.put('flickr.oauth.token_secret', oauth_token_secret);
+    if (oauth_request_token && oauth_request_token_secret) {
+      await env.TCB_KV.put('flickr.oauth.request_token', oauth_request_token);
+      await env.TCB_KV.put('flickr.oauth.request_token_secret', oauth_request_token_secret);
+    } else {
+      return new Response('Cannot get oauth_token or oauth_token_secret from Flickr OAuth service.', { status: 500 });
     }
 
-    return Response.redirect(`https://www.flickr.com/services/oauth/authorize?oauth_token=${oauth_token}`);
+    return Response.redirect(`https://www.flickr.com/services/oauth/authorize?oauth_token=${oauth_request_token}`);
   },
 };
