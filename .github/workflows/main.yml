@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/**"
       - "tcb-flickr-oauth/**"
       - "tcb-flickr-polling/**"
 
@@ -18,11 +19,13 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           workingDirectory: "tcb-flickr-oauth"
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           preCommands: ${{ secrets.PRE_COMMAND }}
       - name: Deploy Polling Worker
         uses: cloudflare/wrangler-action@v3
         with:
           workingDirectory: "tcb-flickr-polling"
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           preCommands: ${{ secrets.PRE_COMMAND }}
