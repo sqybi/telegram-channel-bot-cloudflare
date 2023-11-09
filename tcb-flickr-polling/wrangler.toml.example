@@ -5,6 +5,8 @@ main = "src/index.ts"
 compatibility_date = "2023-10-30"
 node_compat = true
 
+workers_dev = false
+
 kv_namespaces = [
     { binding = "TCB_KV", id = "your_kv_id_here" }  # FIXIT: Use your KV's id
 ]
@@ -27,6 +29,3 @@ new_classes = ["WorkerRunningStatus"]
 
 [triggers]
 crons = ["* * * * *"] # run every minute
-
-[env.production]
-workers_dev = false
