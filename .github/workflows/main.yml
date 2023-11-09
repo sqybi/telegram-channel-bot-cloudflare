@@ -1,0 +1,28 @@
+name: Cloudflare Worker Deployment
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "tcb-flickr-oauth/**"
+      - "tcb-flickr-polling/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy OAuth Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          workingDirectory: "tcb-flickr-oauth"
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          preCommands: ${{ secrets.PROD_PRE_COMMAND }}
+      - name: Deploy Polling Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          workingDirectory: "tcb-flickr-polling"
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          preCommands: ${{ secrets.PROD_PRE_COMMAND }}
