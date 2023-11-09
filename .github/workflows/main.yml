@@ -13,6 +13,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'Production' || 'Development' }}
     steps:
       - uses: actions/checkout@v3
       - name: Deploy OAuth Worker
