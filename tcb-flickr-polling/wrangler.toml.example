@@ -16,7 +16,7 @@ DOMAIN = "your.domain.com"  # FIXIT: Use your domain
 
 [[d1_databases]]
 binding = "TCB_DB"
-database_name = "tcb"  # FIXIT: Use your D1 database's name
+database_name = "your_d1_name_here"  # FIXIT: Use your D1 database's name
 database_id = "your_d1_id_here"  # FIXIT: Use your D1 database's id
 
 [[durable_objects.bindings]]
