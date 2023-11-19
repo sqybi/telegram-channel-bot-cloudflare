@@ -201,7 +201,7 @@ export default {
               }
             } else {
               // Update existing message if caption changed
-              if (posted_message.message_hash === message_content_hash) {
+              if (posted_message.message_hash !== message_content_hash) {
                 const telegram_response = await send_telegram_bot_api('editMessageCaption', telegram_bot_token, {
                   chat_id: posted_message.chat_id,
                   message_id: posted_message.message_id,

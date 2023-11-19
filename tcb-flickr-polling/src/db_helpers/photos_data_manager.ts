@@ -2,7 +2,6 @@ import {
   PhotosExifsRow,
   PhotosMessagesRow,
   PhotosRow,
-  PhotosRowMessageContentColumn,
   PhotosTagsRow,
   UsersRow,
 } from './database_rows';
@@ -152,7 +151,7 @@ class PhotosDataManager {
       `INSERT INTO photos_messages (photo_id, chat_id, message_id, message_hash, photo_url) VALUES (?1, ?2, ?3, ?4, ?5)`
     );
     this.photos_messages_table_update_statement = this.database.prepare(
-      `UPDATE users SET chat_id = ?2, message_id = ?3, message_hash = ?4, photo_url = ?5 WHERE photo_id = ?1`
+      `UPDATE photos_messages SET chat_id = ?2, message_id = ?3, message_hash = ?4, photo_url = ?5 WHERE photo_id = ?1`
     );
   }
 
