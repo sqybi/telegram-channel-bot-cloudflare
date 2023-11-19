@@ -1,119 +1,11 @@
-import request_flickr_api, { FlickrOauthConfig } from './oauth_helpers/request_flickr_api';
-import send_telegram_bot_api from './telegram_helpers/send_telegram_bot_api';
-import report_error_to_telegram from './telegram_helpers/report_error_to_telegram';
-import escape_telegram_markdown from './telegram_helpers/escape_telegram_markdown';
+import { PhotosMessagesRow } from './db_helpers/database_rows';
+import PhotosDataManager from './db_helpers/photos_data_manager';
 import { TcbFatalError } from './errors';
-import moment from 'moment';
-
-type ExifData = Record<string, any>;
-
-function generate_exif(raw_exif: any): ExifData {
-  const exif_labels = new Set([
-    'Date and Time (Original)',
-    'Offset Time',
-    'Make',
-    'Model',
-    'Lens Model',
-    'Focal Length',
-    'Focal Length (35mm format)',
-    'Exposure Program',
-    'Exposure',
-    'Aperture',
-    'ISO Speed',
-  ]);
-
-  const exif: ExifData = {};
-  for (const raw_exif_item of raw_exif) {
-    if (exif_labels.has(raw_exif_item.$.label)) {
-      exif[raw_exif_item.$.label] = raw_exif_item.raw[0];
-    }
-  }
-
-  return exif;
-}
-
-function generate_photo_information(base_info: any, ext_info: any, exif: ExifData) {
-  // Title
-  let result = `*${base_info.title}*\n`;
-
-  // Description
-  if (ext_info.description[0]) {
-    result += escape_telegram_markdown(`${ext_info.description[0]}\n\n`);
-  }
-
-  // Flickr page
-  let flickr_url = null;
-  if (ext_info.urls && ext_info.urls[0].url) {
-    for (const url of ext_info.urls[0].url) {
-      if (url.$.type === 'photopage') {
-        flickr_url = url._;
-      }
-    }
-    if (flickr_url) {
-      result += `[Flickr 页面](${flickr_url})\n\n`;
-    }
-  }
-
-  // Date
-  if (exif['Date Created']) {
-    const datetime_created = moment.parseZone(
-      `${exif['Date and Time (Original)']}${exif['Offset Time']}`,
-      'YYYY:MM:DD HH:mm:ssZ'
-    );
-    result += `*拍摄时间* ${escape_telegram_markdown(datetime_created.toISOString())}\n`;
-  }
-
-  // Model
-  if (exif['Model']) {
-    result += `*相机型号* ${escape_telegram_markdown(exif['Model'])}\n`;
-  }
-
-  // Lens Model
-  if (exif['Lens Model']) {
-    result += `*镜头型号* ${escape_telegram_markdown(exif['Lens Model'])}\n`;
-  }
-
-  // Focal Length
-  if (exif['Focal Length'] || exif['Focal Length (35mm format)']) {
-    let key = '';
-    let value = '';
-    if (exif['Focal Length']) {
-      key += '焦距';
-      value += exif['Focal Length'];
-    }
-    if (exif['Focal Length'] && exif['Focal Length (35mm format)']) {
-      key += ' / ';
-      value += ' / ';
-    }
-    if (exif['Focal Length (35mm format)']) {
-      key += '35mm 等效焦距';
-      value += exif['Focal Length (35mm format)'];
-    }
-    result += `*${key}* ${escape_telegram_markdown(value)}\n`;
-  }
-
-  // Exposure Program
-  if (exif['Exposure Program']) {
-    result += `*曝光程序* ${escape_telegram_markdown(exif['Exposure Program'])}\n`;
-  }
-
-  // Exposure
-  if (exif['Exposure']) {
-    result += `*曝光时间* ${escape_telegram_markdown(exif['Exposure'])}\n`;
-  }
-
-  // Aperture
-  if (exif['Aperture']) {
-    result += `*光圈* ${escape_telegram_markdown(exif['Aperture'])}\n`;
-  }
-
-  // ISO Speed
-  if (exif['ISO Speed']) {
-    result += `*ISO* ${escape_telegram_markdown(exif['ISO Speed'])}\n`;
-  }
-
-  return result;
-}
+import generate_photo_message from './message_generators/photo_message_generator';
+import generate_photo_message_hash from './message_generators/photo_message_hash_generator';
+import request_flickr_api, { FlickrOauthConfig } from './oauth_helpers/request_flickr_api';
+import report_error_to_telegram from './telegram_helpers/report_error_to_telegram';
+import send_telegram_bot_api from './telegram_helpers/send_telegram_bot_api';
 
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -122,17 +14,28 @@ export default {
       status_obj_id = env.WORKER_RUNNING_STATUS.newUniqueId().toString();
       await env.TCB_KV.put('worker.polling.running_status_id', status_obj_id);
     }
-    const status_obj = env.WORKER_RUNNING_STATUS.get(env.WORKER_RUNNING_STATUS.idFromString(status_obj_id));
+    let status_obj;
+    try {
+      status_obj = env.WORKER_RUNNING_STATUS.get(env.WORKER_RUNNING_STATUS.idFromString(status_obj_id));
+    } catch (error) {
+      if (error instanceof TypeError) {
+        status_obj_id = env.WORKER_RUNNING_STATUS.newUniqueId().toString();
+        await env.TCB_KV.put('worker.polling.running_status_id', status_obj_id);
+        status_obj = env.WORKER_RUNNING_STATUS.get(env.WORKER_RUNNING_STATUS.idFromString(status_obj_id));
+      } else {
+        throw error;
+      }
+    }
     const status = await status_obj.fetch('http://status/get');
-    if (await status.text() === 'working') {
-      console.log('Another plling worker is working, skip this run');
+    if ((await status.text()) === 'working') {
+      console.log('Another polling worker is working, skip this run');
       return;
     }
 
     try {
       await status_obj.fetch('http://status/set/working');
 
-      const redirect_url = `https://${env.DOMAIN}/flickr/oauth`;
+      // Get Telegram configs
       const telegram_bot_token = await env.TCB_KV.get('telegram.bot_token');
       if (!telegram_bot_token) {
         throw new TcbFatalError('telegram.bot_token config missing!');
@@ -151,6 +54,8 @@ export default {
         throw new TcbFatalError('telegram.photo_channel_id config missing!');
       }
 
+      // Get Flickr OAuth configs
+      const redirect_url = `https://${env.DOMAIN}/flickr/oauth`;
       const flickr_config: FlickrOauthConfig = {
         oauth_token: (await env.TCB_KV.get('flickr.oauth.token')) || '',
         oauth_token_secret: (await env.TCB_KV.get('flickr.oauth.token_secret')) || '',
@@ -176,109 +81,33 @@ export default {
         throw new TcbFatalError('flickr.consumer.key / flickr.consumer.secret configs missing!');
       }
 
-      // D1 SQL statements
-      const action_statement = env.TCB_DB.prepare('SELECT timestamp FROM actions WHERE action = ?1');
-      const insert_action_statement = env.TCB_DB.prepare('INSERT INTO actions (action, timestamp) VALUES (?1, ?2)');
-      const update_action_statement = env.TCB_DB.prepare('UPDATE actions SET timestamp = ?2 WHERE action = ?1');
-      const photo_statement = env.TCB_DB.prepare('SELECT * FROM photos WHERE id = ?1');
-      const insert_photo_statement = env.TCB_DB.prepare(
-        'INSERT INTO photos (id, secret, owner, is_public, is_published) VALUES (?1, ?2, ?3, ?4, ?5)'
-      );
-      const update_photo_statement = env.TCB_DB.prepare(
-        'UPDATE photos SET secret = ?2, owner = ?3, is_public = ?4 WHERE id = ?1'
-      );
-      const update_photo_is_published_statement = env.TCB_DB.prepare(
-        'UPDATE photos SET is_published = ?2 WHERE id = ?1'
-      );
-
       // Polling Flickr photos
       try {
         const update_time = Math.floor(new Date().getTime() / 1000);
 
-        const { results: recently_updated_action_result } = await action_statement.bind('recentlyUpdated').all();
-        let recently_updated_action_timestamp = 1; // default value
-        if (recently_updated_action_result.length === 0) {
-          await insert_action_statement.bind('recentlyUpdated', recently_updated_action_timestamp).run();
-        } else {
-          recently_updated_action_timestamp = recently_updated_action_result[0].timestamp as number;
-        }
+        const photos_data_manager = new PhotosDataManager(env.TCB_DB);
+        await photos_data_manager.initialize_tables();
 
+        const recently_updated_action_timestamp = await photos_data_manager.get_action_timestamp('recentlyUpdated');
+
+        const recently_updated_photo_base_infos = [];
         let page = 1;
         while (true) {
           // Get new photos
           const recently_updated_data = await request_flickr_api(
             'flickr.photos.recentlyUpdated',
             {
-              min_date: recently_updated_action_timestamp.toString(),
+              min_date: recently_updated_action_timestamp?.toString() || '1',
               page: page.toString(),
             },
             flickr_config,
             redirect_url
           );
 
-          // Check each photo
+          // Append each photo to list
           if (recently_updated_data.rsp.photos[0]?.photo) {
-            for (const photo of recently_updated_data.rsp.photos[0].photo) {
-              // Get photo base info
-              const photo_base_info = photo.$;
-
-              // Check if photo has been sent
-              const { results: photo_sent_result } = await photo_statement.bind(photo_base_info.id).all();
-              if (photo_sent_result.length > 0) {
-                // Update existing photo info
-                await update_photo_statement
-                  .bind(photo_base_info.id, photo_base_info.secret, photo_base_info.owner, photo_base_info.ispublic)
-                  .run();
-                // Telegram doesn't support updating photo caption, so skip if photo has been published
-                if (photo_sent_result[0].is_published === 1) {
-                  continue;
-                }
-              } else {
-                // Add new photo to database, with is_published = 0
-                await insert_photo_statement
-                  .bind(photo_base_info.id, photo_base_info.secret, photo_base_info.owner, photo_base_info.ispublic, 0)
-                  .run();
-              }
-
-              // Skip if photo is not public
-              if (photo_base_info.ispublic === '0') {
-                continue;
-              }
-
-              // Get photo ext info
-              const photo_ext_info_data = await request_flickr_api(
-                'flickr.photos.getInfo',
-                {
-                  photo_id: photo_base_info.id,
-                  secret: photo_base_info.secret,
-                },
-                flickr_config,
-                redirect_url
-              );
-              const photo_ext_info = photo_ext_info_data.rsp.photo[0];
-
-              // Get photo exif
-              const photo_exif_data = await request_flickr_api(
-                'flickr.photos.getExif',
-                {
-                  photo_id: photo_base_info.id,
-                  secret: photo_base_info.secret,
-                },
-                flickr_config,
-                redirect_url
-              );
-              const exif = generate_exif(photo_exif_data.rsp.photo[0].exif);
-
-              // Send to Telegram channel
-              await send_telegram_bot_api('sendPhoto', telegram_bot_token, {
-                chat_id: telegram_photo_channel_id,
-                photo: `https://live.staticflickr.com/${photo_base_info.server}/${photo_base_info.id}_${photo_base_info.secret}_c.jpg`,
-                caption: generate_photo_information(photo_base_info, photo_ext_info, exif),
-                parse_mode: 'MarkdownV2',
-              });
-
-              // Update photo is_published
-              await update_photo_is_published_statement.bind(photo_base_info.id, 1).run();
+            for (const photo_base_info of recently_updated_data.rsp.photos[0].photo) {
+              recently_updated_photo_base_infos.push(photo_base_info);
             }
           }
 
@@ -289,13 +118,124 @@ export default {
           page += 1;
         }
 
+        // Reverse photo list to make sure the oldest photo is processed first
+        recently_updated_photo_base_infos.reverse();
+
+        for (const photo_base_info of recently_updated_photo_base_infos) {
+          // Useful items in photo base info
+          const photo_id = photo_base_info.$.id;
+          const photo_secret = photo_base_info.$.secret;
+
+          // Get full photo info
+          const photo_info_data = await request_flickr_api(
+            'flickr.photos.getInfo',
+            {
+              photo_id,
+              secret: photo_secret,
+            },
+            flickr_config,
+            redirect_url
+          );
+          const photo_info = photo_info_data.rsp.photo[0];
+
+          // Get photo EXIF info
+          const photo_exif_data = await request_flickr_api(
+            'flickr.photos.getExif',
+            {
+              photo_id,
+              secret: photo_secret,
+            },
+            flickr_config,
+            redirect_url
+          );
+          const photo_exif_info = photo_exif_data.rsp.photo[0];
+
+          // Generate DB structures
+          const photos_row = await photos_data_manager.generate_photos_row(photo_info);
+          const photos_tags_rows = await photos_data_manager.generate_photos_tags_rows(photo_info);
+          const photos_exifs_row = await photos_data_manager.generate_photos_exifs_row(photo_exif_info);
+          const users_row = await photos_data_manager.generate_users_row(photo_info);
+
+          // Update DB
+          await photos_data_manager.upsert_photos_table(photos_row);
+          for (const photos_tags_row of photos_tags_rows) {
+            await photos_data_manager.upsert_photos_tags_table(photos_tags_row);
+          }
+          await photos_data_manager.upsert_photos_exifs_table(photos_exifs_row);
+          await photos_data_manager.upsert_users_table(users_row);
+
+          if (photos_row.info.permission.is_public) {
+            const message_content_markdown = await generate_photo_message(
+              photos_row,
+              photos_exifs_row,
+              photos_tags_rows
+            );
+            const message_content_hash = await generate_photo_message_hash(message_content_markdown);
+            const message_photo_url = `https://live.staticflickr.com/${photos_row.server}/${photos_row.id}_${photos_row.secret}_c.jpg`;
+
+            // Send or update Telegram message
+            const posted_message = await photos_data_manager.get_existing_message(photo_id);
+            if (posted_message?.chat_id?.toString() !== telegram_photo_channel_id) {
+              // Send new message when no posted message, or posted message is in another channel
+              const telegram_response = await send_telegram_bot_api('sendPhoto', telegram_bot_token, {
+                chat_id: telegram_photo_channel_id,
+                photo: message_photo_url,
+                caption: message_content_markdown,
+                parse_mode: 'MarkdownV2',
+              });
+              const telegram_response_json = (await telegram_response.json()) as any;
+              if (!telegram_response_json.ok) {
+                throw new TcbFatalError(`Telegram API error:\n${JSON.stringify(telegram_response_json)}`);
+              }
+              const message_row: PhotosMessagesRow = {
+                photo_id,
+                chat_id: telegram_photo_channel_id,
+                message_id: telegram_response_json.result.message_id,
+                message_hash: message_content_hash,
+                photo_url: message_photo_url,
+              };
+              if (posted_message) {
+                await photos_data_manager.update_message(message_row);
+              } else {
+                await photos_data_manager.insert_message(message_row);
+              }
+            } else {
+              // Update existing message if caption changed
+              if (posted_message.message_hash === message_content_hash) {
+                const telegram_response = await send_telegram_bot_api('editMessageCaption', telegram_bot_token, {
+                  chat_id: posted_message.chat_id,
+                  message_id: posted_message.message_id,
+                  caption: message_content_markdown,
+                  parse_mode: 'MarkdownV2',
+                });
+                const telegram_response_json = (await telegram_response.json()) as any;
+                if (!telegram_response_json.ok) {
+                  throw new TcbFatalError(`Telegram API error:\n${JSON.stringify(telegram_response_json)}`);
+                }
+                const message_row: PhotosMessagesRow = {
+                  photo_id,
+                  chat_id: telegram_photo_channel_id,
+                  message_id: telegram_response_json.result.message_id,
+                  message_hash: message_content_hash,
+                  photo_url: message_photo_url,
+                };
+                await photos_data_manager.update_message(message_row);
+              }
+            }
+          }
+        }
+
         // Update recentlyUpdated action timestamp
-        await update_action_statement.bind('recentlyUpdated', update_time).run();
+        if (recently_updated_action_timestamp) {
+          await photos_data_manager.update_action_timestamp('recentlyUpdated', update_time);
+        } else {
+          await photos_data_manager.insert_action_timestamp('recentlyUpdated', update_time);
+        }
       } catch (error) {
         if (error instanceof TcbFatalError) {
           throw error;
         }
-        let error_message = error instanceof Error ? error.message : String(error);
+        let error_message = error instanceof Error ? error.message + '\n' + error.stack ?? '' : String(error);
         await report_error_to_telegram(telegram_bot_token, telegram_error_reporting_chat_id, error_message);
       }
     } finally {
