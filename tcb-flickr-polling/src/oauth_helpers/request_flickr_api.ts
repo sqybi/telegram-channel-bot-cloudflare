@@ -77,8 +77,7 @@ export default async function request_flickr_api(
     } else {
       const error_message = error instanceof Error ? (error as Error).message : String(error);
       const full_error_message = `Flickr API error: ${error_message}\n${flickr_method}\n${JSON.stringify(request)}}`;
-      await report_error(config, false, full_error_message);
-      throw new TcbFatalError(full_error_message);
+      await report_error(config, true, full_error_message);
     }
   }
 }

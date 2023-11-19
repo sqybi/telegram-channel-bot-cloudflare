@@ -6,7 +6,9 @@ compatibility_date = "2023-10-30"
 node_compat = true
 
 workers_dev = false
-routes = [ { pattern = "your.domain.com/*", zone_name = "domain.com" } ]  # FIXIT: Use your domain
+routes = [
+    { pattern = "your.domain.com", custom_domain = true }  # FIXIT: Use your domain
+]
 
 kv_namespaces = [
     { binding = "TCB_KV", id = "your_kv_id_here" }  # FIXIT: Use your KV's id
