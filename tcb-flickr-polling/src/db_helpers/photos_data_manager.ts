@@ -158,7 +158,7 @@ class PhotosDataManager {
   // Initialization
 
   async initialize_tables(): Promise<void> {
-    const result = await this.actions_table_create_statement.bind().run();
+    await this.actions_table_create_statement.bind().run();
     await this.photos_table_create_statement.bind().run();
     await this.photos_tags_table_create_statement.bind().run();
     await this.photos_exifs_table_create_statement.bind().run();
