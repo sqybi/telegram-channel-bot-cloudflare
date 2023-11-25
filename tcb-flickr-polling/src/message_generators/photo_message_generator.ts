@@ -1,6 +1,82 @@
 import { PhotosExifsRow, PhotosRow, PhotosTagsRow } from '../db_helpers/database_rows';
 import escape_telegram_markdown from '../telegram_helpers/escape_telegram_markdown';
 
+const MAX_CAPTION_LENGTH = 1024;
+
+async function generate_caption(data: any, length_limit_mode: boolean = false): Promise<string> {
+  const components = [
+    `*${data.title}*`,
+    data.exif.artist ? `  // ${data.exif.artist}` : '',
+    '\n\n',
+    data.description ? `${data.description}` : '\\.\\.\\.',
+    '\n\n',
+    data.url ? `[Flickr 页面](${data.url})\n\n` : '',
+    data.tags
+      ? data.tags.reduce(
+          (acc: string, cur: string) => `${acc}[\\#${cur}](https://www.flickr.com/photos/tags/${cur}) `,
+          ''
+        ) + '\n\n'
+      : '',
+    data.exif.copyright ? `\`Copyright ©${data.exif.copyright}\`\n\n` : '',
+    '\n',
+    data.date ? `*拍摄时间* \\| ${data.date}\n` : '',
+    data.exif.make || data.exif.model
+      ? `*相机型号* \\| ${data.exif.make}${data.exif.make && data.exif.model ? ' ' : ''}${data.exif.model}\n`
+      : '',
+    data.exif.lens_model ? `*镜头型号* \\| ${data.exif.lens_model}\n` : '',
+    data.exif.max_aperture ? `*最大光圈* \\| ${data.exif.max_aperture}\n` : '',
+    '\n',
+    data.exif.focal_length || data.exif.focal_length_35mm
+      ? `*${data.exif.focal_length ? '焦距' : ''}${data.exif.focal_length && data.exif.focal_length_35mm ? ' / ' : ''}${
+          data.exif.focal_length_35mm ? '35mm 等效焦距' : ''
+        }* \\| ${data.exif.focal_length}${data.exif.focal_length && data.exif.focal_length_35mm ? ' / ' : ''}${
+          data.exif.focal_length_35mm
+        }\n`
+      : '',
+    data.exif.exposure ? `*曝光时间* \\| ${data.exif.exposure}\n` : '',
+    data.exif.aperture ? `*光圈* \\| ${data.exif.aperture}\n` : '',
+    data.exif.iso ? `*ISO* \\| ${data.exif.iso}\n` : '',
+    '\n',
+    data.exif.exposure_program
+      ? `*曝光程序* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/exposureprogram.html) \\| ${data.exif.exposure_program}\n`
+      : '',
+    data.exif.exposure_mode
+      ? `*曝光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/exposuremode.html) \\| ${data.exif.exposure_mode}\n`
+      : '',
+    data.exif.flash
+      ? `*闪光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/flash.html) \\| ${data.exif.flash}\n`
+      : '',
+    data.exif.white_balance
+      ? `*白平衡模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/whitebalance.html) \\| ${data.exif.white_balance}\n`
+      : '',
+    data.exif.metering_mode
+      ? `*测光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/meteringmode.html) \\| ${data.exif.metering_mode}\n`
+      : '',
+    data.exif.light_source
+      ? `*光源类型* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/lightsource.html) \\| ${data.exif.light_source}\n`
+      : '',
+    '\n',
+    data.exif.brightness_value
+      ? `*亮度* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/brightnessvalue.html) \\| ${data.exif.brightness_value}\n`
+      : '',
+    data.exif.exposure_compensation ? `*曝光补偿* \\| ${data.exif.exposure_compensation}\n` : '',
+  ];
+
+  if (length_limit_mode) {
+    let result = '';
+    for (const component of components) {
+      if (result.length + component.length > MAX_CAPTION_LENGTH) {
+        result += '...';
+        break;
+      }
+      result += component;
+    }
+    return result;
+  } else {
+    return components.join('');
+  }
+}
+
 export default async function generate_photo_message(
   photos_row: PhotosRow,
   photos_exifs_row: PhotosExifsRow,
@@ -45,59 +121,15 @@ export default async function generate_photo_message(
     },
   };
 
-  let result = '';
-  result += `*${data.title}*`;
-  result += data.exif.artist ? `  // ${data.exif.artist}` : '';
-  result += '\n\n';
-  result += data.description ? `${data.description}` : '\\.\\.\\.';
-  result += '\n\n';
-  result += data.url ? `[Flickr 页面](${data.url})\n\n` : '';
-  result += data.tags ? data.tags.map((tag) => `[\\#${tag}](https://www.flickr.com/photos/tags/${tag}) `) + '\n\n' : '';
-  result += data.exif.copyright ? `\`Copyright ©${data.exif.copyright}\`\n\n` : '';
-  result += '\n';
-  result += data.date ? `*拍摄时间* \\| ${data.date}\n` : '';
-  result +=
-    data.exif.make || data.exif.model
-      ? `*相机型号* \\| ${data.exif.make}${data.exif.make && data.exif.model ? ' ' : ''}${data.exif.model}\n`
-      : '';
-  result += data.exif.lens_model ? `*镜头型号* \\| ${data.exif.lens_model}\n` : '';
-  result += data.exif.max_aperture ? `*最大光圈* \\| ${data.exif.max_aperture}\n` : '';
-  result += '\n';
-  result +=
-    data.exif.focal_length || data.exif.focal_length_35mm
-      ? `*${data.exif.focal_length ? '焦距' : ''}${data.exif.focal_length && data.exif.focal_length_35mm ? ' / ' : ''}${
-          data.exif.focal_length_35mm ? '35mm 等效焦距' : ''
-        }* \\| ${data.exif.focal_length}${data.exif.focal_length && data.exif.focal_length_35mm ? ' / ' : ''}${
-          data.exif.focal_length_35mm
-        }\n`
-      : '';
-  result += data.exif.exposure ? `*曝光时间* \\| ${data.exif.exposure}\n` : '';
-  result += data.exif.aperture ? `*光圈* \\| ${data.exif.aperture}\n` : '';
-  result += data.exif.iso ? `*ISO* \\| ${data.exif.iso}\n` : '';
-  result += '\n';
-  result += data.exif.exposure_program
-    ? `*曝光程序* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/exposureprogram.html) \\| ${data.exif.exposure_program}\n`
-    : '';
-  result += data.exif.exposure_mode
-    ? `*曝光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/exposuremode.html) \\| ${data.exif.exposure_mode}\n`
-    : '';
-  result += data.exif.flash
-    ? `*闪光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/flash.html) \\| ${data.exif.flash}\n`
-    : '';
-  result += data.exif.white_balance
-    ? `*白平衡模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/whitebalance.html) \\| ${data.exif.white_balance}\n`
-    : '';
-  result += data.exif.metering_mode
-    ? `*测光模式* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/meteringmode.html) \\| ${data.exif.metering_mode}\n`
-    : '';
-  result += data.exif.light_source
-    ? `*光源类型* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/lightsource.html) \\| ${data.exif.light_source}\n`
-    : '';
-  result += '\n';
-  result += data.exif.brightness_value
-    ? `*亮度* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/brightnessvalue.html) \\| ${data.exif.brightness_value}\n`
-    : '';
-  result += data.exif.exposure_compensation ? `*曝光补偿* \\| ${data.exif.exposure_compensation}\n` : '';
+  let result = await generate_caption(data);
+  if (result.length > MAX_CAPTION_LENGTH) {
+    const diff = result.length - MAX_CAPTION_LENGTH + 3;
+    data.description = data.description?.slice(0, -diff);
+    if (data.description) {
+      data.description = data.description + '...';
+    }
+    result = await generate_caption(data, true);
+  }
 
   return result;
 }
