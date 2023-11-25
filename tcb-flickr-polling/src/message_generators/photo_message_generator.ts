@@ -1,50 +1,9 @@
 import { PhotosExifsRow, PhotosRow, PhotosTagsRow } from '../db_helpers/database_rows';
 import escape_telegram_markdown from '../telegram_helpers/escape_telegram_markdown';
 
-export default async function generate_photo_message(
-  photos_row: PhotosRow,
-  photos_exifs_row: PhotosExifsRow,
-  photos_tags_rows: PhotosTagsRow[]
-) {
-  // No template engines! `eval` is not allowed.
+const MAX_CAPTION_LENGTH = 1000;
 
-  const data = {
-    title: escape_telegram_markdown(photos_row.info.title),
-    description: escape_telegram_markdown(photos_row.info.description),
-    url: escape_telegram_markdown(photos_row.info.page_url),
-    tags: photos_tags_rows.map((photos_tags_row) => photos_tags_row.tag_info.tag_name),
-    date: escape_telegram_markdown(photos_row.info.date.taken),
-    exif: {
-      artist: escape_telegram_markdown(photos_exifs_row.exif_info.artist),
-      copyright: escape_telegram_markdown(photos_exifs_row.exif_info.copyright),
-      make: escape_telegram_markdown(photos_exifs_row.exif_info.make),
-      model: escape_telegram_markdown(photos_exifs_row.exif_info.model),
-      lens_model: escape_telegram_markdown(photos_exifs_row.exif_info.lens_model),
-      max_aperture: escape_telegram_markdown(photos_exifs_row.exif_info.max_aperture),
-      focal_length: escape_telegram_markdown(
-        photos_exifs_row.exif_info.clean.focal_length ?? photos_exifs_row.exif_info.focal_length
-      ),
-      focal_length_35mm: escape_telegram_markdown(photos_exifs_row.exif_info.focal_length_in_35mm_format),
-      exposure: escape_telegram_markdown(
-        photos_exifs_row.exif_info.clean.exposure ?? photos_exifs_row.exif_info.exposure
-      ),
-      aperture: escape_telegram_markdown(
-        photos_exifs_row.exif_info.clean.aperture ?? photos_exifs_row.exif_info.aperture
-      ),
-      iso: escape_telegram_markdown(photos_exifs_row.exif_info.iso),
-      exposure_program: escape_telegram_markdown(photos_exifs_row.exif_info.exposure_program),
-      exposure_mode: escape_telegram_markdown(photos_exifs_row.exif_info.exposure_mode),
-      flash: escape_telegram_markdown(photos_exifs_row.exif_info.flash),
-      white_balance: escape_telegram_markdown(photos_exifs_row.exif_info.white_balance),
-      metering_mode: escape_telegram_markdown(photos_exifs_row.exif_info.metering_mode),
-      light_source: escape_telegram_markdown(photos_exifs_row.exif_info.light_source),
-      brightness_value: escape_telegram_markdown(photos_exifs_row.exif_info.brightness_value),
-      exposure_compensation: escape_telegram_markdown(
-        photos_exifs_row.exif_info.clean.exposure_compensation ?? photos_exifs_row.exif_info.exposure_compensation
-      ),
-    },
-  };
-
+async function generate_caption(data: any): Promise<string> {
   let result = '';
   result += `*${data.title}*`;
   result += data.exif.artist ? `  // ${data.exif.artist}` : '';
@@ -52,7 +11,12 @@ export default async function generate_photo_message(
   result += data.description ? `${data.description}` : '\\.\\.\\.';
   result += '\n\n';
   result += data.url ? `[Flickr 页面](${data.url})\n\n` : '';
-  result += data.tags ? data.tags.map((tag) => `[\\#${tag}](https://www.flickr.com/photos/tags/${tag}) `) + '\n\n' : '';
+  result += data.tags
+    ? data.tags.reduce(
+        (acc: string, cur: string) => `${acc}[\\#${cur}](https://www.flickr.com/photos/tags/${cur}) `,
+        ''
+      ) + '\n\n'
+    : '';
   result += data.exif.copyright ? `\`Copyright ©${data.exif.copyright}\`\n\n` : '';
   result += '\n';
   result += data.date ? `*拍摄时间* \\| ${data.date}\n` : '';
@@ -98,6 +62,66 @@ export default async function generate_photo_message(
     ? `*亮度* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/brightnessvalue.html) \\| ${data.exif.brightness_value}\n`
     : '';
   result += data.exif.exposure_compensation ? `*曝光补偿* \\| ${data.exif.exposure_compensation}\n` : '';
+
+  return result;
+}
+
+export default async function generate_photo_message(
+  photos_row: PhotosRow,
+  photos_exifs_row: PhotosExifsRow,
+  photos_tags_rows: PhotosTagsRow[]
+) {
+  // No template engines! `eval` is not allowed.
+
+  const data = {
+    title: escape_telegram_markdown(photos_row.info.title),
+    description: escape_telegram_markdown(photos_row.info.description),
+    url: escape_telegram_markdown(photos_row.info.page_url),
+    tags: photos_tags_rows.map((photos_tags_row) => photos_tags_row.tag_info.tag_name),
+    date: escape_telegram_markdown(photos_row.info.date.taken),
+    exif: {
+      artist: escape_telegram_markdown(photos_exifs_row.exif_info.artist),
+      copyright: escape_telegram_markdown(photos_exifs_row.exif_info.copyright),
+      make: escape_telegram_markdown(photos_exifs_row.exif_info.make),
+      model: escape_telegram_markdown(photos_exifs_row.exif_info.model),
+      lens_model: escape_telegram_markdown(photos_exifs_row.exif_info.lens_model),
+      max_aperture: escape_telegram_markdown(photos_exifs_row.exif_info.max_aperture),
+      focal_length: escape_telegram_markdown(
+        photos_exifs_row.exif_info.clean.focal_length ?? photos_exifs_row.exif_info.focal_length
+      ),
+      focal_length_35mm: escape_telegram_markdown(photos_exifs_row.exif_info.focal_length_in_35mm_format),
+      exposure: escape_telegram_markdown(
+        photos_exifs_row.exif_info.clean.exposure ?? photos_exifs_row.exif_info.exposure
+      ),
+      aperture: escape_telegram_markdown(
+        photos_exifs_row.exif_info.clean.aperture ?? photos_exifs_row.exif_info.aperture
+      ),
+      iso: escape_telegram_markdown(photos_exifs_row.exif_info.iso),
+      exposure_program: escape_telegram_markdown(photos_exifs_row.exif_info.exposure_program),
+      exposure_mode: escape_telegram_markdown(photos_exifs_row.exif_info.exposure_mode),
+      flash: escape_telegram_markdown(photos_exifs_row.exif_info.flash),
+      white_balance: escape_telegram_markdown(photos_exifs_row.exif_info.white_balance),
+      metering_mode: escape_telegram_markdown(photos_exifs_row.exif_info.metering_mode),
+      light_source: escape_telegram_markdown(photos_exifs_row.exif_info.light_source),
+      brightness_value: escape_telegram_markdown(photos_exifs_row.exif_info.brightness_value),
+      exposure_compensation: escape_telegram_markdown(
+        photos_exifs_row.exif_info.clean.exposure_compensation ?? photos_exifs_row.exif_info.exposure_compensation
+      ),
+    },
+  };
+
+  let result = await generate_caption(data);
+  if (result.length > MAX_CAPTION_LENGTH) {
+    const diff = result.length - MAX_CAPTION_LENGTH + 3;
+    data.description = data.description?.slice(0, -diff);
+    if (data.description) {
+      data.description = data.description + '...';
+    }
+    result = await generate_caption(data);
+    if (result.length > MAX_CAPTION_LENGTH) {
+      result = result.slice(0, MAX_CAPTION_LENGTH - 3) + '...';
+    }
+  }
 
   return result;
 }
