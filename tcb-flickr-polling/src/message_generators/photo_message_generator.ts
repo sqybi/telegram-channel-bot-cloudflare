@@ -65,8 +65,8 @@ async function generate_caption(data: any, length_limit_mode: boolean = false): 
   if (length_limit_mode) {
     let result = '';
     for (const component of components) {
-      if (result.length + component.length > MAX_CAPTION_LENGTH) {
-        result += '...';
+      if (result.length + component.length > MAX_CAPTION_LENGTH - 6) {
+        result += '\\.\\.\\.';
         break;
       }
       result += component;
@@ -123,10 +123,10 @@ export default async function generate_photo_message(
 
   let result = await generate_caption(data);
   if (result.length > MAX_CAPTION_LENGTH) {
-    const diff = result.length - MAX_CAPTION_LENGTH + 3;
+    const diff = result.length - MAX_CAPTION_LENGTH + 7;
     data.description = data.description?.slice(0, -diff);
     if (data.description) {
-      data.description = data.description + '...';
+      data.description = data.description + '\n\\.\\.\\.';
     }
     result = await generate_caption(data, true);
   }
