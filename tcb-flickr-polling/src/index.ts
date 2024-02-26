@@ -7,6 +7,10 @@ import request_flickr_api, { FlickrOauthConfig } from './oauth_helpers/request_f
 import report_error_to_telegram from './telegram_helpers/report_error_to_telegram';
 import send_telegram_bot_api from './telegram_helpers/send_telegram_bot_api';
 
+function sleep(duration_ms: number) {
+  return new Promise(resolve => setTimeout(resolve, duration_ms));
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     let status_obj_id = await env.TCB_KV.get('worker.polling.running_status_id');
@@ -26,15 +30,13 @@ export default {
         throw error;
       }
     }
-    const status = await status_obj.fetch('http://status/get');
-    if ((await status.text()) === 'working') {
-      console.log('Another polling worker is working, skip this run');
+    const lock_status = await status_obj.fetch('http://status/acquire');
+    if (!lock_status.ok) {
+      console.log("Another polling worker is working, skip this run");
       return;
     }
 
     try {
-      await status_obj.fetch('http://status/set/working');
-
       // Get Telegram configs
       const telegram_bot_token = await env.TCB_KV.get('telegram.bot_token');
       if (!telegram_bot_token) {
@@ -239,36 +241,62 @@ export default {
         await report_error_to_telegram(telegram_bot_token, telegram_error_reporting_chat_id, error_message);
       }
     } finally {
-      await status_obj.fetch('http://status/set/idle');
+      const MAX_RETRIES = 10;
+      const MAX_DELAY = 60 * 1000;  // 60 * 1000ms = 60s
+      let attempt = 0;
+      let delay = 1000;  // 1000ms = 1s
+      while (true) {
+        try {
+          const release_status = await status_obj.fetch('http://status/release');
+          if (release_status.ok) {
+            break;
+          }
+          console.log("Error when releasing lock: ", release_status.status, release_status.statusText);
+        } catch (error) {
+          console.log("Error when releasing lock: ", error);
+        }
+
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`Failed to relase lock after ${MAX_RETRIES} retries.`);
+        }
+
+        console.log(`Waiting for ${delay / 1000} seconds before retrying...`);
+        await sleep(delay);
+
+        delay = Math.min(MAX_DELAY, delay * 2);
+        attempt++;
+      }
     }
   },
 };
 
 export class WorkerRunningStatus {
   state: DurableObjectState;
+  locked: boolean;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
+    this.locked = false;
   }
 
   async fetch(request: Request) {
     const url = new URL(request.url);
 
-    let status: string = (await this.state.storage.get('status')) || 'idle';
     switch (url.pathname) {
-      case '/get':
-        return new Response(status.toString());
-      case '/set/working':
-        status = 'working';
-        break;
-      case '/set/idle':
-        status = 'idle';
-        break;
+      case '/acquire':
+        if (this.locked) {
+          return new Response("Lock is already acquired", { status: 400 });
+        } else {
+          this.locked = true;
+          await this.state.storage.put("locked", true);
+          return new Response("Lock acquired", { status: 200 });
+        }
+      case '/release':
+        this.locked = false;
+        await this.state.storage.delete("locked");
+        return new Response("Lock released", { status: 200 });
       default:
         return new Response('Not found', { status: 404 });
     }
-    await this.state.storage.put('status', status);
-
-    return new Response(status.toString());
   }
 }
