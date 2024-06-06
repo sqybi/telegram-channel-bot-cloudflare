@@ -1,4 +1,3 @@
-import { assert } from 'console';
 import { marked } from 'marked';
 import { load } from 'cheerio';
 
@@ -106,7 +105,6 @@ async function generate_text(data: any, smart_length_limit_mode: boolean = false
     text += APPENDING_TEXT;
   }
   const shorten_length = (await generate_plain_text_from_markdown(pre_text + text + post_text)).length;
-  assert(shorten_length <= MAX_CAPTION_LENGTH, `Caption length ${shorten_length} exceeds limit`);
   return pre_text + text + post_text;
 }
 
