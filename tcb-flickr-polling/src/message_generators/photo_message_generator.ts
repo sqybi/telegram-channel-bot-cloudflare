@@ -98,13 +98,18 @@ async function generate_text(data: any, smart_length_limit_mode: boolean = false
     let post_plain_text = await generate_plain_text_from_markdown(post_text);
     if (pre_plain_text.length + post_plain_text.length >= MAX_CAPTION_LENGTH - APPENDING_TEXT_LENGTH) {
       // Leave spaces for two appending texts, one on post_text and one on text
+      const post_text_length = post_text.length;
       post_text = await smart_shorten_text(post_text, MAX_CAPTION_LENGTH - APPENDING_TEXT_LENGTH * 2 - pre_plain_text.length);
-      post_text += APPENDING_TEXT;
+      if (post_text.length < post_text_length) {
+        post_text += APPENDING_TEXT;
+      }
     }
+    const text_length = text.length;
     text = await smart_shorten_text(text, MAX_CAPTION_LENGTH - pre_plain_text.length - post_plain_text.length - APPENDING_TEXT_LENGTH);
-    text += APPENDING_TEXT;
+    if (text.length < text_length) {
+      text += APPENDING_TEXT;
+    }
   }
-  const shorten_length = (await generate_plain_text_from_markdown(pre_text + text + post_text)).length;
   return pre_text + text + post_text;
 }
 
