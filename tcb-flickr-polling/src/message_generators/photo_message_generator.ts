@@ -1,14 +1,46 @@
+import { assert } from 'console';
+import { marked } from 'marked';
+import { load } from 'cheerio';
+
 import { PhotosExifsRow, PhotosRow, PhotosTagsRow } from '../db_helpers/database_rows';
 import escape_telegram_markdown from '../telegram_helpers/escape_telegram_markdown';
 
-const MAX_CAPTION_LENGTH = 1024;
+const MAX_CAPTION_LENGTH = 1000;  // Telegram's limit is 1024, leave some spaces for different calculation methods
+const APPENDING_TEXT = '\n\n\\.\\.\\.';
+const APPENDING_TEXT_LENGTH = (await generate_plain_text_from_markdown(APPENDING_TEXT)).length;
 
-async function generate_caption(data: any, length_limit_mode: boolean = false): Promise<string> {
-  const components = [
+async function generate_plain_text_from_markdown(text: string): Promise<string> {
+  const html = await marked(text);
+  return load(html).text();
+}
+
+async function smart_shorten_text(text: string, length_limit: number): Promise<string> {
+  let l = length_limit + 1;
+  let r = text.length;
+  let result = text.slice(0, length_limit);
+  while (l <= r) {
+    const mid = Math.floor((l + r) / 2);
+    const sliced_text = text.slice(0, mid);
+    const plain_text = await generate_plain_text_from_markdown(sliced_text);
+    if (plain_text.length <= length_limit) {
+      result = sliced_text;
+      l = mid + 1;
+    } else {
+      r = mid - 1;
+    }
+  }
+  return result;
+}
+
+async function generate_text(data: any, smart_length_limit_mode: boolean = false): Promise<string> {
+  // Let's assume pre_text itself will never exceed Telegram's length limit
+  const pre_text = [
     `*${data.title}*`,
     data.exif.artist ? `  // ${data.exif.artist}` : '',
     '\n\n',
-    data.description ? `${data.description}` : '\\.\\.\\.',
+  ].join('');
+  let text = data.description;
+  let post_text = [
     '\n\n',
     data.url ? `[Flickr 页面](${data.url})\n\n` : '',
     data.tags
@@ -60,21 +92,22 @@ async function generate_caption(data: any, length_limit_mode: boolean = false): 
       ? `*亮度* [\\(?\\)](https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/brightnessvalue.html) \\| ${data.exif.brightness_value}\n`
       : '',
     data.exif.exposure_compensation ? `*曝光补偿* \\| ${data.exif.exposure_compensation}\n` : '',
-  ];
+  ].join('');
 
-  if (length_limit_mode) {
-    let result = '';
-    for (const component of components) {
-      if (result.length + component.length > MAX_CAPTION_LENGTH - 6) {
-        result += '\\.\\.\\.';
-        break;
-      }
-      result += component;
+  if (smart_length_limit_mode) {
+    const pre_plain_text = await generate_plain_text_from_markdown(pre_text);
+    let post_plain_text = await generate_plain_text_from_markdown(post_text);
+    if (pre_plain_text.length + post_plain_text.length >= MAX_CAPTION_LENGTH - APPENDING_TEXT_LENGTH) {
+      // Leave spaces for two appending texts, one on post_text and one on text
+      post_text = await smart_shorten_text(post_text, MAX_CAPTION_LENGTH - APPENDING_TEXT_LENGTH * 2 - pre_plain_text.length);
+      post_text += APPENDING_TEXT;
     }
-    return result;
-  } else {
-    return components.join('');
+    text = await smart_shorten_text(text, MAX_CAPTION_LENGTH - pre_plain_text.length - post_plain_text.length - APPENDING_TEXT_LENGTH);
+    text += APPENDING_TEXT;
   }
+  const shorten_length = (await generate_plain_text_from_markdown(pre_text + text + post_text)).length;
+  assert(shorten_length <= MAX_CAPTION_LENGTH, `Caption length ${shorten_length} exceeds limit`);
+  return pre_text + text + post_text;
 }
 
 export default async function generate_photo_message(
@@ -121,15 +154,5 @@ export default async function generate_photo_message(
     },
   };
 
-  let result = await generate_caption(data);
-  if (result.length > MAX_CAPTION_LENGTH) {
-    const diff = result.length - MAX_CAPTION_LENGTH + 7;
-    data.description = data.description?.slice(0, -diff);
-    if (data.description) {
-      data.description = data.description + '\n\\.\\.\\.';
-    }
-    result = await generate_caption(data, true);
-  }
-
-  return result;
+  return await generate_text(data, true);
 }
